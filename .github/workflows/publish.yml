@@ -1,0 +1,171 @@
+# Publish ghcr.io/ao-cyber-systems/flutter:<version> (+ :<major.minor>) for
+# linux/amd64 and linux/arm64, cosign-signed (keyless) by digest, with SBOM +
+# provenance attestations.
+#
+# Trigger: push a tag named after the Flutter version, e.g. `v3.47.5`
+# (Dockerfile's FLUTTER_VERSION must match — the workflow checks), or run
+# manually via workflow_dispatch against a tag.
+#
+# Each arch is built on a NATIVE runner (ubuntu-24.04 / ubuntu-24.04-arm) and
+# pushed by digest; a merge job stitches the multi-arch index. Building arm64
+# under QEMU is avoided on purpose: the Dart VM + `flutter precache` under
+# emulation is slow and flaky.
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # push to GHCR
+  id-token: write   # cosign keyless (OIDC)
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ao-cyber-systems/flutter
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Resolve version from tag and check it matches the Dockerfile
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "::error::Run this workflow against a v* tag (got ${GITHUB_REF})"; exit 1
+          fi
+          VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION="$(sed -n 's/^ARG FLUTTER_VERSION=//p' Dockerfile)"
+          if [[ "${VERSION}" != "${FILE_VERSION}" ]]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} != Dockerfile FLUTTER_VERSION ${FILE_VERSION}"; exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: meta
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Create multi-arch index (:<version>, :<major.minor>; never :latest)
+        working-directory: /tmp/digests
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${REGISTRY}/${IMAGE}:${VERSION}" \
+            -t "${REGISTRY}/${IMAGE}:${MINOR}" \
+            $(printf "${REGISTRY}/${IMAGE}@sha256:%s " *)
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          MINOR: ${{ needs.meta.outputs.minor }}
+
+      - name: Resolve index digest
+        id: digest
+        run: |
+          set -euo pipefail
+          DIGEST="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE}@${DIGEST}"
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+
+      - name: Sign by digest (cosign keyless)
+        run: cosign sign --yes --recursive "${REGISTRY}/${IMAGE}@${DIGEST}"
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published ${REGISTRY}/${IMAGE}:${VERSION}"
+            echo
+            echo "Pin by digest:"
+            echo
+            echo '```'
+            echo "FROM ${REGISTRY}/${IMAGE}:${VERSION}@${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Published ${REGISTRY}/${IMAGE}:${VERSION}@${DIGEST}"
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
