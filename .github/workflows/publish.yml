@@ -1,4 +1,4 @@
-# Publish ghcr.io/ao-cyber-systems/flutter:<version> (+ :<major.minor>) for
+# Publish ghcr.io/aocyberai/flutter:<version> (+ :<major.minor>) for
 # linux/amd64 and linux/arm64, cosign-signed (keyless) by digest, with SBOM +
 # provenance attestations.
 #
@@ -25,7 +25,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE: ao-cyber-systems/flutter
+  IMAGE: aocyberai/flutter
 
 concurrency:
   group: publish-${{ github.ref }}
