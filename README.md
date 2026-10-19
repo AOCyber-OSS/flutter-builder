@@ -3,8 +3,8 @@
 Flutter SDK builder image for AO Cyber Systems CI and Docker builds.
 
 ```
-ghcr.io/ao-cyber-systems/flutter:3.47.5   # Flutter 3.47.5 stable, Dart 3.13.4
-ghcr.io/ao-cyber-systems/flutter:3.47     # moving tag: newest 3.47.x we published
+ghcr.io/aocyberai/flutter:3.47.5   # Flutter 3.47.5 stable, Dart 3.13.4
+ghcr.io/aocyberai/flutter:3.47     # moving tag: newest 3.47.x we published
 ```
 
 Platforms: `linux/amd64`, `linux/arm64`. Public — pulls need no registry credentials
@@ -20,7 +20,7 @@ carries only what `flutter build web` needs — no Android SDK.
 ## Usage
 
 ```dockerfile
-FROM ghcr.io/ao-cyber-systems/flutter:3.47.5@sha256:<digest> AS builder
+FROM ghcr.io/aocyberai/flutter:3.47.5@sha256:<digest> AS builder
 WORKDIR /app
 COPY . .
 RUN flutter pub get && flutter build web --release
@@ -30,14 +30,14 @@ RUN flutter pub get && flutter build web --release
 publish workflow's run summary, or:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/ao-cyber-systems/flutter:3.47.5
+docker buildx imagetools inspect ghcr.io/aocyberai/flutter:3.47.5
 ```
 
 Verify the signature (cosign keyless, signed by this repo's publish workflow):
 
 ```sh
-cosign verify ghcr.io/ao-cyber-systems/flutter:3.47.5 \
-  --certificate-identity-regexp '^https://github.com/AO-Cyber-Systems/flutter-builder/\.github/workflows/publish\.yml@refs/tags/v' \
+cosign verify ghcr.io/aocyberai/flutter:3.47.5 \
+  --certificate-identity-regexp '^https://github.com/AOCyber-OSS/flutter-builder/\.github/workflows/publish\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

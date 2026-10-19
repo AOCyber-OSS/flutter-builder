@@ -22,7 +22,7 @@ ARG EXPECTED_DART_VERSION=3.13.4
 
 LABEL org.opencontainers.image.title="flutter" \
       org.opencontainers.image.description="Flutter SDK builder image for AO Cyber Systems CI and Docker builds" \
-      org.opencontainers.image.source="https://github.com/AO-Cyber-Systems/flutter-builder" \
+      org.opencontainers.image.source="https://github.com/AOCyber-OSS/flutter-builder" \
       org.opencontainers.image.vendor="AO Cyber Systems" \
       org.opencontainers.image.version="${FLUTTER_VERSION}"
 
